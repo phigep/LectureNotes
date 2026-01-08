@@ -37,9 +37,9 @@ def load_imdb_data(
         num_words=num_words
     )
     
-    # Pad sequences to uniform length
-    X_train = keras.preprocessing.sequence.pad_sequences(X_train, maxlen=maxlen)
-    X_test_full = keras.preprocessing.sequence.pad_sequences(X_test_full, maxlen=maxlen)
+    # Pad sequences to uniform length (post-padding for cuDNN compatibility)
+    X_train = keras.preprocessing.sequence.pad_sequences(X_train, maxlen=maxlen, padding='post')
+    X_test_full = keras.preprocessing.sequence.pad_sequences(X_test_full, maxlen=maxlen, padding='post')
     
     # Split test data into validation and hold-out test
     split_idx = int(len(X_test_full) * test_split)
@@ -595,4 +595,5 @@ def create_lstm_model_with_embedding(
     )
     
     return model
+
 

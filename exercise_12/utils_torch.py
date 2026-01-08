@@ -36,9 +36,9 @@ def load_imdb_data_torch(
         num_words=num_words
     )
     
-    # Pad sequences
-    X_train = keras.preprocessing.sequence.pad_sequences(X_train, maxlen=maxlen)
-    X_test_full = keras.preprocessing.sequence.pad_sequences(X_test_full, maxlen=maxlen)
+    # Pad sequences (post-padding for consistency)
+    X_train = keras.preprocessing.sequence.pad_sequences(X_train, maxlen=maxlen, padding='post')
+    X_test_full = keras.preprocessing.sequence.pad_sequences(X_test_full, maxlen=maxlen, padding='post')
     
     # Split test into val and test
     split_idx = int(len(X_test_full) * test_split)
@@ -479,4 +479,5 @@ def compare_models(results: dict) -> None:
     
     plt.tight_layout()
     plt.show()
+
 
