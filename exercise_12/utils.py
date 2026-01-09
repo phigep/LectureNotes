@@ -1,12 +1,9 @@
 """
 Utilities for Exercise 12 - LSTM IMDB Sentiment Classification
-Provides preprocessing for TextVectorization and Word2Vec embeddings.
 """
 import keras
 import numpy as np
-import re
-import string
-from typing import Tuple, Optional
+from typing import Tuple
 
 
 # =============================================================================
@@ -32,21 +29,20 @@ def load_imdb_data(
         X_test, y_test: Hold-out test data
         word_index: Word to index mapping
     """
-    # Load data
+
     (X_train, y_train), (X_test_full, y_test_full) = keras.datasets.imdb.load_data(
         num_words=num_words
     )
     
-    # Pad sequences to uniform length (post-padding for cuDNN compatibility)
     X_train = keras.preprocessing.sequence.pad_sequences(X_train, maxlen=maxlen, padding='post')
     X_test_full = keras.preprocessing.sequence.pad_sequences(X_test_full, maxlen=maxlen, padding='post')
     
-    # Split test data into validation and hold-out test
+
     split_idx = int(len(X_test_full) * test_split)
     X_val, X_test = X_test_full[:split_idx], X_test_full[split_idx:]
     y_val, y_test = y_test_full[:split_idx], y_test_full[split_idx:]
     
-    # Get word index
+
     word_index = keras.datasets.imdb.get_word_index()
     
     print(f"Training samples:   {len(X_train):,}")
@@ -58,175 +54,16 @@ def load_imdb_data(
     return X_train, y_train, X_val, y_val, X_test, y_test, word_index
 
 
-def load_imdb_texts(
-    num_words: int = 10000,
-    maxlen: int = 500,
-    test_split: float = 0.5
-) -> Tuple[list, np.ndarray, list, np.ndarray, list, np.ndarray, dict]:
-    """
-    Load IMDB dataset and decode back to text for TextVectorization approach.
-    
-    Returns:
-        texts_train, y_train: Training texts and labels
-        texts_val, y_val: Validation texts and labels
-        texts_test, y_test: Test texts and labels
-        word_index: Word to index mapping
-    """
-    # Load raw data
-    (X_train, y_train), (X_test_full, y_test_full) = keras.datasets.imdb.load_data(
-        num_words=num_words
-    )
-    
-    # Get word index and create reverse mapping
-    word_index = keras.datasets.imdb.get_word_index()
-    reverse_word_index = {v + 3: k for k, v in word_index.items()}
-    reverse_word_index[0] = '<PAD>'
-    reverse_word_index[1] = '<START>'
-    reverse_word_index[2] = '<OOV>'
-    
-    def decode_review(encoded_review):
-        return ' '.join(reverse_word_index.get(i, '<OOV>') for i in encoded_review)
-    
-    # Decode all reviews
-    texts_train = [decode_review(x) for x in X_train]
-    texts_test_full = [decode_review(x) for x in X_test_full]
-    
-    # Split test data
-    split_idx = int(len(texts_test_full) * test_split)
-    texts_val = texts_test_full[:split_idx]
-    texts_test = texts_test_full[split_idx:]
-    y_val = y_test_full[:split_idx]
-    y_test = y_test_full[split_idx:]
-    
-    print(f"Training samples:   {len(texts_train):,}")
-    print(f"Validation samples: {len(texts_val):,}")
-    print(f"Test samples:       {len(texts_test):,}")
-    print(f"Vocabulary size:    {num_words:,}")
-    
-    return texts_train, y_train, texts_val, y_val, texts_test, y_test, word_index
-
-
 # =============================================================================
-# TextVectorization Preprocessing
+# GloVe Embeddings
 # =============================================================================
-
-def custom_standardization(input_data):
-    """Remove HTML tags and punctuation, convert to lowercase."""
-    import tensorflow as tf
-    lowercase = tf.strings.lower(input_data)
-    stripped_html = tf.strings.regex_replace(lowercase, '<br />', ' ')
-    return tf.strings.regex_replace(
-        stripped_html, 
-        '[%s]' % re.escape(string.punctuation), 
-        ''
-    )
-
-
-def create_text_vectorization_layer(
-    texts: list,
-    max_tokens: int = 10000,
-    output_sequence_length: int = 500
-) -> keras.layers.TextVectorization:
-    """
-    Create and adapt a TextVectorization layer.
-    
-    Args:
-        texts: List of text strings to adapt the vocabulary on
-        max_tokens: Maximum vocabulary size
-        output_sequence_length: Fixed output sequence length
-        
-    Returns:
-        Adapted TextVectorization layer
-    """
-    import tensorflow as tf
-    
-    vectorize_layer = keras.layers.TextVectorization(
-        standardize=custom_standardization,
-        max_tokens=max_tokens,
-        output_mode='int',
-        output_sequence_length=output_sequence_length
-    )
-    
-    # Adapt on training texts
-    text_ds = tf.data.Dataset.from_tensor_slices(texts).batch(128)
-    vectorize_layer.adapt(text_ds)
-    
-    vocab_size = len(vectorize_layer.get_vocabulary())
-    print(f"TextVectorization vocabulary size: {vocab_size:,}")
-    
-    return vectorize_layer
-
-
-def vectorize_texts(
-    vectorize_layer: keras.layers.TextVectorization,
-    texts: list
-) -> np.ndarray:
-    """Vectorize a list of texts using a fitted TextVectorization layer."""
-    return np.array([vectorize_layer(text).numpy() for text in texts])
-
-
-# =============================================================================
-# Word2Vec Preprocessing
-# =============================================================================
-
-def load_word2vec_embeddings(
-    filepath: str,
-    word_index: dict,
-    embedding_dim: int = 300,
-    num_words: int = 10000
-) -> np.ndarray:
-    """
-    Load pre-trained Word2Vec embeddings and create embedding matrix.
-    
-    Args:
-        filepath: Path to Word2Vec file (text format, e.g., GoogleNews vectors)
-        word_index: Dictionary mapping words to indices
-        embedding_dim: Dimension of embeddings
-        num_words: Maximum vocabulary size
-        
-    Returns:
-        Embedding matrix of shape (num_words, embedding_dim)
-    """
-    print(f"Loading Word2Vec embeddings from {filepath}...")
-    
-    embeddings_index = {}
-    with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
-        for line in f:
-            values = line.split()
-            if len(values) < embedding_dim + 1:
-                continue
-            word = values[0]
-            try:
-                coefs = np.asarray(values[1:embedding_dim+1], dtype='float32')
-                embeddings_index[word] = coefs
-            except ValueError:
-                continue
-    
-    print(f"Found {len(embeddings_index):,} word vectors")
-    
-    # Create embedding matrix
-    embedding_matrix = np.zeros((num_words, embedding_dim))
-    found_words = 0
-    
-    for word, i in word_index.items():
-        if i >= num_words:
-            continue
-        embedding_vector = embeddings_index.get(word)
-        if embedding_vector is not None:
-            embedding_matrix[i] = embedding_vector
-            found_words += 1
-    
-    print(f"Matched {found_words:,} words ({100*found_words/min(len(word_index), num_words):.1f}%)")
-    
-    return embedding_matrix
-
 
 def download_glove_embeddings(
     glove_dim: int = 100,
     cache_dir: str = None
 ) -> str:
     """
-    Download GloVe embeddings (alternative to Word2Vec, easier to download).
+    Download GloVe embeddings.
     
     Args:
         glove_dim: Embedding dimension (50, 100, 200, or 300)
@@ -538,62 +375,3 @@ def plot_training_history(history: keras.callbacks.History, title: str = None) -
     
     plt.tight_layout()
     plt.show()
-
-
-# =============================================================================
-# Model Building Helpers
-# =============================================================================
-
-def create_lstm_model_with_embedding(
-    vocab_size: int,
-    embedding_dim: int = 32,
-    max_length: int = 500,
-    lstm_units: int = 100,
-    embedding_matrix: np.ndarray = None,
-    trainable_embeddings: bool = True
-) -> keras.Model:
-    """
-    Create LSTM model with trainable or pre-trained embeddings.
-    
-    Args:
-        vocab_size: Size of vocabulary
-        embedding_dim: Embedding dimension
-        max_length: Maximum sequence length
-        lstm_units: Number of LSTM units
-        embedding_matrix: Pre-trained embedding matrix (optional)
-        trainable_embeddings: Whether embeddings should be trainable
-        
-    Returns:
-        Compiled Keras model
-    """
-    model = keras.models.Sequential([
-        keras.layers.Input(shape=(max_length,)),
-    ])
-    
-    if embedding_matrix is not None:
-        model.add(keras.layers.Embedding(
-            input_dim=vocab_size,
-            output_dim=embedding_dim,
-            weights=[embedding_matrix],
-            trainable=trainable_embeddings,
-            mask_zero=True
-        ))
-    else:
-        model.add(keras.layers.Embedding(
-            input_dim=vocab_size,
-            output_dim=embedding_dim,
-            mask_zero=True
-        ))
-    
-    model.add(keras.layers.LSTM(lstm_units))
-    model.add(keras.layers.Dense(1, activation='sigmoid'))
-    
-    model.compile(
-        optimizer='adam',
-        loss='binary_crossentropy',
-        metrics=['accuracy']
-    )
-    
-    return model
-
-

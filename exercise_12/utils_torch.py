@@ -1,51 +1,32 @@
 """
-PyTorch utilities for Exercise 12 - xLSTM (mLSTM/sLSTM) IMDB Sentiment Classification
+PyTorch utilities for Exercise 12 - xLSTM IMDB Sentiment Classification
 """
 import torch
 import torch.nn as nn
 import numpy as np
-from typing import Tuple, Optional
+from typing import Tuple
 import matplotlib.pyplot as plt
 
-
-# =============================================================================
-# Data Loading (PyTorch-compatible)
-# =============================================================================
 
 def load_imdb_data_torch(
     num_words: int = 10000,
     maxlen: int = 500,
     test_split: float = 0.5
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, dict]:
-    """
-    Load IMDB dataset from keras.datasets and convert to PyTorch tensors.
-    
-    Args:
-        num_words: Maximum vocabulary size
-        maxlen: Maximum sequence length
-        test_split: Fraction of test data to use as hold-out set
-        
-    Returns:
-        X_train, y_train, X_val, y_val, X_test, y_test as PyTorch tensors
-        word_index: Word to index mapping
-    """
+    """Load IMDB dataset and convert to PyTorch tensors."""
     import keras
     
-    # Load from keras
     (X_train, y_train), (X_test_full, y_test_full) = keras.datasets.imdb.load_data(
         num_words=num_words
     )
     
-    # Pad sequences (post-padding for consistency)
     X_train = keras.preprocessing.sequence.pad_sequences(X_train, maxlen=maxlen, padding='post')
     X_test_full = keras.preprocessing.sequence.pad_sequences(X_test_full, maxlen=maxlen, padding='post')
     
-    # Split test into val and test
     split_idx = int(len(X_test_full) * test_split)
     X_val, X_test = X_test_full[:split_idx], X_test_full[split_idx:]
     y_val, y_test = y_test_full[:split_idx], y_test_full[split_idx:]
     
-    # Convert to PyTorch tensors
     X_train = torch.tensor(X_train, dtype=torch.long)
     y_train = torch.tensor(y_train, dtype=torch.float32)
     X_val = torch.tensor(X_val, dtype=torch.long)
@@ -72,7 +53,6 @@ def create_dataloaders(
     batch_size: int = 64
 ) -> Tuple[torch.utils.data.DataLoader, torch.utils.data.DataLoader]:
     """Create PyTorch DataLoaders for training and validation."""
-    
     train_dataset = torch.utils.data.TensorDataset(X_train, y_train)
     val_dataset = torch.utils.data.TensorDataset(X_val, y_val)
     
@@ -86,20 +66,10 @@ def create_dataloaders(
     return train_loader, val_loader
 
 
-# =============================================================================
-# Model Definitions
-# =============================================================================
-
 class LSTMClassifier(nn.Module):
-    """Standard LSTM classifier for comparison."""
+    """Standard LSTM classifier."""
     
-    def __init__(
-        self,
-        vocab_size: int,
-        embedding_dim: int,
-        hidden_dim: int,
-        padding_idx: int = 0
-    ):
+    def __init__(self, vocab_size: int, embedding_dim: int, hidden_dim: int, padding_idx: int = 0):
         super().__init__()
         self.embedding = nn.Embedding(vocab_size, embedding_dim, padding_idx=padding_idx)
         self.lstm = nn.LSTM(embedding_dim, hidden_dim, batch_first=True)
@@ -107,23 +77,16 @@ class LSTMClassifier(nn.Module):
         self.sigmoid = nn.Sigmoid()
         
     def forward(self, x):
-        # x: (batch, seq_len)
-        embedded = self.embedding(x)  # (batch, seq_len, embedding_dim)
-        _, (hidden, _) = self.lstm(embedded)  # hidden: (1, batch, hidden_dim)
-        out = self.fc(hidden.squeeze(0))  # (batch, 1)
+        embedded = self.embedding(x)
+        _, (hidden, _) = self.lstm(embedded)
+        out = self.fc(hidden.squeeze(0))
         return self.sigmoid(out)
 
 
 class mLSTMClassifier(nn.Module):
     """mLSTM-based classifier using xLSTM library."""
     
-    def __init__(
-        self,
-        vocab_size: int,
-        embedding_dim: int,
-        num_heads: int = 4,
-        padding_idx: int = 0
-    ):
+    def __init__(self, vocab_size: int, embedding_dim: int, num_heads: int = 4, padding_idx: int = 0):
         super().__init__()
         from xlstm import (
             xLSTMBlockStack,
@@ -134,7 +97,6 @@ class mLSTMClassifier(nn.Module):
         
         self.embedding = nn.Embedding(vocab_size, embedding_dim, padding_idx=padding_idx)
         
-        # Configure mLSTM block
         cfg = xLSTMBlockStackConfig(
             mlstm_block=mLSTMBlockConfig(
                 mlstm=mLSTMLayerConfig(
@@ -143,10 +105,10 @@ class mLSTMClassifier(nn.Module):
                     num_heads=num_heads
                 )
             ),
-            context_length=512,  # Max sequence length
-            num_blocks=1,        # Single layer as requested
+            context_length=512,
+            num_blocks=1,
             embedding_dim=embedding_dim,
-            slstm_at=[],         # No sLSTM blocks
+            slstm_at=[],
         )
         
         self.xlstm = xLSTMBlockStack(cfg)
@@ -154,26 +116,17 @@ class mLSTMClassifier(nn.Module):
         self.sigmoid = nn.Sigmoid()
         
     def forward(self, x):
-        # x: (batch, seq_len)
-        embedded = self.embedding(x)  # (batch, seq_len, embedding_dim)
-        xlstm_out = self.xlstm(embedded)  # (batch, seq_len, embedding_dim)
-        # Take the last timestep
-        last_hidden = xlstm_out[:, -1, :]  # (batch, embedding_dim)
-        out = self.fc(last_hidden)  # (batch, 1)
+        embedded = self.embedding(x)
+        xlstm_out = self.xlstm(embedded)
+        last_hidden = xlstm_out[:, -1, :]
+        out = self.fc(last_hidden)
         return self.sigmoid(out)
 
 
 class sLSTMClassifier(nn.Module):
     """sLSTM-based classifier using xLSTM library."""
     
-    def __init__(
-        self,
-        vocab_size: int,
-        embedding_dim: int,
-        num_heads: int = 4,
-        padding_idx: int = 0,
-        backend: str = "vanilla"
-    ):
+    def __init__(self, vocab_size: int, embedding_dim: int, num_heads: int = 4, padding_idx: int = 0, backend: str = "vanilla"):
         super().__init__()
         from xlstm import (
             xLSTMBlockStack,
@@ -185,21 +138,20 @@ class sLSTMClassifier(nn.Module):
         
         self.embedding = nn.Embedding(vocab_size, embedding_dim, padding_idx=padding_idx)
         
-        # Configure sLSTM block
         cfg = xLSTMBlockStackConfig(
             slstm_block=sLSTMBlockConfig(
                 slstm=sLSTMLayerConfig(
-                    backend=backend,  # "cuda" requires Compute Capability >= 8.0
+                    backend=backend,
                     num_heads=num_heads,
                     conv1d_kernel_size=4,
                     bias_init="powerlaw_blockdependent",
                 ),
                 feedforward=FeedForwardConfig(proj_factor=1.3, act_fn="gelu"),
             ),
-            context_length=512,  # Max sequence length
-            num_blocks=1,        # Single layer as requested
+            context_length=512,
+            num_blocks=1,
             embedding_dim=embedding_dim,
-            slstm_at=[0],        # Use sLSTM at block 0
+            slstm_at=[0],
         )
         
         self.xlstm = xLSTMBlockStack(cfg)
@@ -207,26 +159,14 @@ class sLSTMClassifier(nn.Module):
         self.sigmoid = nn.Sigmoid()
         
     def forward(self, x):
-        # x: (batch, seq_len)
-        embedded = self.embedding(x)  # (batch, seq_len, embedding_dim)
-        xlstm_out = self.xlstm(embedded)  # (batch, seq_len, embedding_dim)
-        # Take the last timestep
-        last_hidden = xlstm_out[:, -1, :]  # (batch, embedding_dim)
-        out = self.fc(last_hidden)  # (batch, 1)
+        embedded = self.embedding(x)
+        xlstm_out = self.xlstm(embedded)
+        last_hidden = xlstm_out[:, -1, :]
+        out = self.fc(last_hidden)
         return self.sigmoid(out)
 
 
-# =============================================================================
-# Training
-# =============================================================================
-
-def train_epoch(
-    model: nn.Module,
-    train_loader: torch.utils.data.DataLoader,
-    optimizer: torch.optim.Optimizer,
-    criterion: nn.Module,
-    device: torch.device
-) -> Tuple[float, float]:
+def train_epoch(model, train_loader, optimizer, criterion, device):
     """Train for one epoch."""
     model.train()
     total_loss = 0
@@ -250,12 +190,7 @@ def train_epoch(
     return total_loss / total, correct / total
 
 
-def evaluate(
-    model: nn.Module,
-    data_loader: torch.utils.data.DataLoader,
-    criterion: nn.Module,
-    device: torch.device
-) -> Tuple[float, float]:
+def evaluate(model, data_loader, criterion, device):
     """Evaluate model on a dataset."""
     model.eval()
     total_loss = 0
@@ -277,22 +212,8 @@ def evaluate(
     return total_loss / total, correct / total
 
 
-def train_model(
-    model: nn.Module,
-    train_loader: torch.utils.data.DataLoader,
-    val_loader: torch.utils.data.DataLoader,
-    device: torch.device,
-    epochs: int = 10,
-    lr: float = 1e-3,
-    patience: int = 3,
-    verbose: bool = True
-) -> dict:
-    """
-    Train model with early stopping.
-    
-    Returns:
-        Dictionary with training history
-    """
+def train_model(model, train_loader, val_loader, device, epochs=10, lr=1e-3, patience=3, verbose=True):
+    """Train model with early stopping."""
     model = model.to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     criterion = nn.BCELoss()
@@ -320,7 +241,6 @@ def train_model(
                   f"Loss: {train_loss:.4f} - Acc: {train_acc:.4f} - "
                   f"Val Loss: {val_loss:.4f} - Val Acc: {val_acc:.4f}")
         
-        # Early stopping
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             patience_counter = 0
@@ -332,28 +252,14 @@ def train_model(
                     print(f"Early stopping at epoch {epoch+1}")
                 break
     
-    # Restore best model
     if best_state is not None:
         model.load_state_dict(best_state)
     
     return history
 
 
-# =============================================================================
-# Evaluation & Visualization
-# =============================================================================
-
-def eval_binary_classification_torch(
-    model: nn.Module,
-    X_test: torch.Tensor,
-    y_test: torch.Tensor,
-    device: torch.device,
-    model_name: str = None,
-    batch_size: int = 64
-) -> Tuple[float, float]:
-    """
-    Evaluate PyTorch model and display metrics.
-    """
+def eval_binary_classification_torch(model, X_test, y_test, device, model_name=None, batch_size=64):
+    """Evaluate PyTorch model and display metrics."""
     from sklearn.metrics import (
         confusion_matrix, classification_report,
         ConfusionMatrixDisplay, roc_curve, auc
@@ -391,11 +297,9 @@ def eval_binary_classification_torch(
     print(f"  Test Accuracy: {test_acc:.4f} ({test_acc*100:.2f}%)")
     print(f"{'='*60}\n")
     
-    # Classification report
     class_names = ['Negative', 'Positive']
     print(classification_report(y_true, y_pred, target_names=class_names))
     
-    # Plots
     fig, axes = plt.subplots(1, 2, figsize=(14, 5))
     
     cm = confusion_matrix(y_true, y_pred)
@@ -422,13 +326,12 @@ def eval_binary_classification_torch(
     return test_loss, test_acc
 
 
-def plot_training_history(history: dict, title: str = None) -> None:
+def plot_training_history(history, title=None):
     """Plot training history."""
     fig, axes = plt.subplots(1, 2, figsize=(14, 4))
     
     epochs = range(1, len(history['train_loss']) + 1)
     
-    # Loss
     axes[0].plot(epochs, history['train_loss'], label='Training Loss', linewidth=2)
     axes[0].plot(epochs, history['val_loss'], label='Validation Loss', linewidth=2)
     axes[0].set_xlabel('Epoch')
@@ -437,7 +340,6 @@ def plot_training_history(history: dict, title: str = None) -> None:
     axes[0].legend()
     axes[0].grid(True, alpha=0.3)
     
-    # Accuracy
     axes[1].plot(epochs, history['train_acc'], label='Training Accuracy', linewidth=2)
     axes[1].plot(epochs, history['val_acc'], label='Validation Accuracy', linewidth=2)
     axes[1].set_xlabel('Epoch')
@@ -450,7 +352,7 @@ def plot_training_history(history: dict, title: str = None) -> None:
     plt.show()
 
 
-def compare_models(results: dict) -> None:
+def compare_models(results):
     """Compare multiple models visually."""
     names = list(results.keys())
     losses = [r[0] for r in results.values()]
@@ -459,7 +361,6 @@ def compare_models(results: dict) -> None:
     fig, axes = plt.subplots(1, 2, figsize=(12, 4))
     colors = plt.cm.Set2(np.linspace(0, 1, len(names)))
     
-    # Loss
     bars1 = axes[0].bar(names, losses, color=colors)
     axes[0].set_ylabel('Loss')
     axes[0].set_title('Model Comparison - Test Loss')
@@ -468,7 +369,6 @@ def compare_models(results: dict) -> None:
         axes[0].text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01,
                      f'{loss:.4f}', ha='center', va='bottom', fontsize=10)
     
-    # Accuracy
     bars2 = axes[1].bar(names, [a * 100 for a in accuracies], color=colors)
     axes[1].set_ylabel('Accuracy (%)')
     axes[1].set_title('Model Comparison - Test Accuracy')
@@ -479,5 +379,3 @@ def compare_models(results: dict) -> None:
     
     plt.tight_layout()
     plt.show()
-
-
